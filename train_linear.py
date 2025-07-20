@@ -3,8 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from plots import create_enhanced_phase_diagram
 
-LEARNING_RATE = 0.01
-
 # order of priority: gpu -> mps -> cpu
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
