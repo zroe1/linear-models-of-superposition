@@ -7,17 +7,133 @@ from plots import create_enhanced_phase_diagram
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
 
+NUM_CLASSES = 10
+NUM_FEATURES = 2
+IMPORTANCE = (0.85 ** torch.arange(0, NUM_CLASSES)).to(device)
+
+def smallest_angle_between_weights(model):
+    """
+    Compute the smallest angle between any pair of weight vectors in the model.
+    
+    Args:
+        model: ToyModelLinear model with weights of shape (NUM_FEATURES, NUM_CLASSES)
+        
+    Returns:
+        float: Smallest angle in degrees between any pair of weight vectors
+    """
+    import math
+    
+    weights = model.weights.detach().cpu()  # Shape: (NUM_FEATURES, NUM_CLASSES)
+    num_classes = weights.shape[1]
+    
+    if num_classes < 2:
+        return 0.0
+    
+    min_angle = float('inf')
+    
+    # Compute angle between all pairs of weight vectors
+    for i in range(num_classes):
+        for j in range(i + 1, num_classes):
+            vec1 = weights[:, i]  # Shape: (NUM_FEATURES,)
+            vec2 = weights[:, j]  # Shape: (NUM_FEATURES,)
+            
+            # Compute norms
+            norm1 = torch.norm(vec1)
+            norm2 = torch.norm(vec2)
+            
+            # Skip if either vector is zero
+            if norm1 == 0 or norm2 == 0:
+                continue
+                
+            # Compute cosine of angle
+            cos_angle = torch.dot(vec1, vec2) / (norm1 * norm2)
+            
+            # Clamp to avoid numerical errors
+            cos_angle = torch.clamp(cos_angle, -1.0, 1.0)
+            
+            # Compute angle in radians, then convert to degrees
+            angle_radians = torch.acos(cos_angle).item()
+            angle_degrees = math.degrees(angle_radians)
+            
+            # Update minimum angle
+            min_angle = min(min_angle, angle_degrees)
+    
+    return min_angle if min_angle != float('inf') else 0.0
+
+def is_superposition(model, epsilon=None):
+    """
+    Determine if the model is in a superposition regime by checking if the smallest
+    angle between weight vectors is close to the expected angle for evenly distributed vectors.
+    
+    Args:
+        model: ToyModelLinear model with weights of shape (NUM_FEATURES, NUM_CLASSES)
+        epsilon: Tolerance for angle comparison in degrees (default: 5.7)
+        
+    Returns:
+        bool: True if the model appears to be in superposition, False otherwise
+    """
+    # Get number of classes from the model's weight shape
+    num_classes = model.weights.shape[1]
+    
+    if num_classes < 2:
+        return False
+    
+    if epsilon is None:
+        epsilon = (360.0 / num_classes) *0.2
+
+    # Expected angle between adjacent vectors in superposition (360/NUM_CLASSES degrees)
+    expected_angle_degrees = 360.0 / num_classes
+    
+    # Get the smallest angle between any pair of weight vectors (in degrees)
+    smallest_angle = smallest_angle_between_weights(model)
+    
+    # Check if the smallest angle is within epsilon of the expected angle
+    return abs(smallest_angle - expected_angle_degrees) <= epsilon
+
+class ImporanceWeightedMSE(nn.Module):
+    def __init__(self):
+        super(ImporanceWeightedMSE, self).__init__()
+
+    def forward(self, predictions, targets, importance):
+        predictions = F.relu(predictions)
+        sub_total = ((predictions - targets)**2).flatten()
+        return sum(sub_total * importance)
+
+class ImporanceWeightedMSEBatch(nn.Module):
+    """Improved version that handles batches properly like in reference implementation."""
+    def __init__(self):
+        super(ImporanceWeightedMSEBatch, self).__init__()
+
+    def forward(self, predictions, targets, importance):
+        # Handle batch dimension properly
+        sub_total = ((predictions - targets)**2).sum(0).flatten()
+        return sum(sub_total * importance)
+
 class ToyModelLinear(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weights = nn.Parameter(torch.randn(2, 5), requires_grad=True)
-        self.bias = nn.Parameter(torch.randn(5, 1), requires_grad=True)
+        self.weights = nn.Parameter(torch.randn(NUM_FEATURES, NUM_CLASSES) , requires_grad=True)
+        self.bias = nn.Parameter(torch.randn(NUM_CLASSES, 1) , requires_grad=True)
         
-    def forward(self, x): # x is 5 * 1
+    def forward(self, x): # x is NUM_FEATURES * 1
         hidden = self.weights @ x
         final = self.weights.T @ hidden
         final += self.bias
         return final
+
+class ToyModelReLU(nn.Module):
+    """ReLU model based on the reference implementation for 90% sparsity training."""
+    def __init__(self):
+        super().__init__()
+        self.weights = nn.Parameter(torch.randn(NUM_FEATURES, NUM_CLASSES), requires_grad=True)
+        self.bias = nn.Parameter(torch.randn(NUM_CLASSES, 1), requires_grad=True)
+        self.ReLU = nn.ReLU(inplace=True)
+
+    def forward(self, x): # x is NUM_CLASSES * 1
+        hidden = self.weights @ x
+        final = self.weights.T @ hidden
+        final += self.bias
+        return self.ReLU(final)
     
 def f6(logits, target):
     i_neq_t = torch.argmax(logits)
@@ -33,16 +149,30 @@ def zephy_loss1(logits, target, input_t):
         masked_logits = logits.clone()
         masked_logits[target] = float('-inf')
         i_neq_t = torch.argmax(masked_logits)
-    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.01
+    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.02
+
+# def zephy_loss1(logits, target, input_t):
+#     i_neq_t = torch.argmax(logits)
+#     if i_neq_t == target:
+#         masked_logits = logits.clone()
+#         masked_logits[target] = float('-inf')
+#         i_neq_t = torch.argmax(masked_logits)
+#     return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.01
     
+def relu_mse_loss(logits, targets):
+    return torch.mean((F.relu(logits) - targets)**2)
+
 def train_linear(model, epochs, total_batchs, batch_size, optimizer):
     model.train()
     loss_total = 0
+
+    loss_func = ImporanceWeightedMSE()
+
     for epoch in range(epochs):
         for i in range(total_batchs):
-            x = torch.rand(batch_size, 5, 1).to(device)
+            x = torch.rand(batch_size, NUM_CLASSES, 1).to(device)
 
-            targets =  torch.randint(0, 5, (batch_size,)).to(device)
+            targets =  torch.randint(0, NUM_CLASSES, (batch_size,)).to(device)
 
             sparsity_tensor = torch.zeros_like(x).to(device)
             batch_indices = torch.arange(batch_size).to(device)
@@ -52,6 +182,13 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer):
             x = (x*sparsity_tensor).to(device)
             pred = model(x)
 
+            # loss = torch.tensor([0.0]).to(device)
+            # for b in range(batch_size):
+            #     p = pred[b].to(device)
+            #     target = targets[b].to(device)
+
+            #     loss += loss_func(p, x[b], IMPORTANCE)
+
             loss = torch.tensor([0.0]).to(device)
             for b in range(batch_size):
                 p = pred[b].to(device)
@@ -59,30 +196,84 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer):
                 # loss += f6(p, target)
                 loss += zephy_loss1(p, target, x[b][target])
             loss_total += loss.item()
+
+            loss_total += loss.item()
     
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
 
+        if is_superposition(model):
+            print("Superposition detected")
+            break
+
         print("EPHOCH:", epoch + 1, "--> loss:", loss_total / (total_batchs * batch_size))
+        loss_total = 0
+
+def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, importance, sparsity):
+    """Train ReLU model with specified sparsity level based on reference implementation."""
+    probability = 1 - sparsity
+    model.train()
+    loss_total = 0
+    
+    for epoch in range(epochs):
+        for i in range(total_batchs):
+            # Generate sparse data using bernoulli distribution like in reference
+            sparsity_tensor = torch.bernoulli(torch.full((NUM_CLASSES, 1), probability)).to(device)
+            x = torch.rand(batch_size, NUM_CLASSES, 1).to(device)
+            x = (x * sparsity_tensor).to(device)
+            
+            pred = model(x)
+            loss = loss_fn(pred, x, importance)
+            loss_total += loss.item()
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        if is_superposition(model):
+            print("Superposition detected")
+            break
+
+        print("EPOCH:", epoch + 1, "--> loss:", loss_total / (total_batchs * batch_size))
         loss_total = 0
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 5
-    BATCHS_PER_EPOCH =400
-    BATCH_SIZE = 32
+    NUM_EPOCHS = 50
+    BATCHS_PER_EPOCH =100
+    BATCH_SIZE = 128
     LEARNING_RATE = 5e-3
 
 
     model = ToyModelLinear().to(device)
 
-    SPARSITY = 0.95
+    SPARSITY = 0.90
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     # loss_func = ImporanceWeightedMSE()
 
     train_linear(model, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer)
-
-
+    print(smallest_angle_between_weights(model))
+ 
     phase_data = create_enhanced_phase_diagram(model.weights.T.detach().cpu(), model.weights.T.detach().cpu(), 
                                            model.bias.detach().cpu(), 'cpu')
+
+    
+    
+    # print("\n" + "="*50)
+    # print("Training 90% Sparsity ReLU Model")
+    # print("="*50)
+    
+    # SPARSITY = 0.95
+    # model_relu = ToyModelReLU().to(device)
+    # optimizer_relu = torch.optim.SGD(model_relu.parameters(), lr=LEARNING_RATE)
+    # loss_func_relu = ImporanceWeightedMSEBatch()
+    
+    # train_relu(model_relu, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, loss_func_relu, optimizer_relu, IMPORTANCE, SPARSITY)
+    # print("Smallest angle between weights (ReLU model):", smallest_angle_between_weights(model_relu))
+    # print("Is in superposition (ReLU model):", is_superposition(model_relu))
+    
+    # print("\nReLU model weights:")
+    # print(model_relu.weights.T.detach().cpu())
+
+    # phase_data = create_enhanced_phase_diagram(model_relu.weights.T.detach().cpu(), model_relu.weights.T.detach().cpu(), 
+    #                                        model_relu.bias.detach().cpu(), 'cpu')

@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
+NUM_CLASSES = 10
+
 def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
     """
     Create a phase diagram showing class predictions across the latent space
@@ -105,7 +107,7 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
     # Add colorbar for phase diagram
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_label('Predicted Class', fontsize=12)
-    n_classes = 10
+    n_classes = NUM_CLASSES
     cbar.set_ticks(range(n_classes))
     
     # Add legend for weight vectors
