@@ -7,7 +7,7 @@ from plots import create_enhanced_phase_diagram
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
 
-NUM_CLASSES = 10
+NUM_CLASSES = 100
 NUM_FEATURES = 2
 IMPORTANCE = (0.85 ** torch.arange(0, NUM_CLASSES)).to(device)
 
@@ -149,7 +149,7 @@ def zephy_loss1(logits, target, input_t):
         masked_logits = logits.clone()
         masked_logits[target] = float('-inf')
         i_neq_t = torch.argmax(masked_logits)
-    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.001
+    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.0001
 
 # def zephy_loss1(logits, target, input_t):
 #     i_neq_t = torch.argmax(logits)
@@ -161,6 +161,40 @@ def zephy_loss1(logits, target, input_t):
     
 def relu_mse_loss(logits, targets):
     return torch.mean((F.relu(logits) - targets)**2)
+
+def evaluate_accuracy(model):
+    """
+    Evaluate the model's accuracy on one-hot vectors.
+    
+    For each class, create a one-hot vector and check if the model's
+    top prediction matches the correct class.
+    
+    Args:
+        model: The trained model to evaluate
+        
+    Returns:
+        float: Accuracy as a percentage (0-100)
+    """
+    model.eval()
+    correct_predictions = 0
+    total_predictions = NUM_CLASSES
+    
+    with torch.no_grad():
+        for class_idx in range(NUM_CLASSES):
+            # Create one-hot vector for this class
+            one_hot = torch.zeros(NUM_CLASSES, 1).to(device)
+            one_hot[class_idx, 0] = 1.0
+            
+            # Get model prediction
+            output = model(one_hot.unsqueeze(0))  # Add batch dimension
+            predicted_class = torch.argmax(output[0]).item()
+            
+            # Check if prediction matches the true class
+            if predicted_class == class_idx:
+                correct_predictions += 1
+    
+    accuracy = (correct_predictions / total_predictions) * 100.0
+    return accuracy
 
 def train_linear(model, epochs, total_batchs, batch_size, optimizer):
     model.train()
@@ -242,7 +276,7 @@ if __name__ == "__main__":
     NUM_EPOCHS = 50
     BATCHS_PER_EPOCH =100
     BATCH_SIZE = 128
-    LEARNING_RATE = 5e-3
+    LEARNING_RATE = 7.5e-3
 
 
     model = ToyModelLinear().to(device)
@@ -253,6 +287,11 @@ if __name__ == "__main__":
 
     train_linear(model, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer)
     print(smallest_angle_between_weights(model))
+    
+    # Evaluate accuracy
+    accuracy = evaluate_accuracy(model)
+    print(f"Linear Model Accuracy: {accuracy:.2f}%")
+    print(f"Is in superposition: {is_superposition(model)}")
  
     phase_data = create_enhanced_phase_diagram(model.weights.T.detach().cpu(), model.weights.T.detach().cpu(), 
                                            model.bias.detach().cpu(), 'cpu')
@@ -271,6 +310,10 @@ if __name__ == "__main__":
     # train_relu(model_relu, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, loss_func_relu, optimizer_relu, IMPORTANCE, SPARSITY)
     # print("Smallest angle between weights (ReLU model):", smallest_angle_between_weights(model_relu))
     # print("Is in superposition (ReLU model):", is_superposition(model_relu))
+    
+    # # Evaluate ReLU model accuracy
+    # accuracy_relu = evaluate_accuracy(model_relu)
+    # print(f"ReLU Model Accuracy: {accuracy_relu:.2f}%")
     
     # print("\nReLU model weights:")
     # print(model_relu.weights.T.detach().cpu())

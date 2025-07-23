@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-NUM_CLASSES = 10
+NUM_CLASSES = 100
 
 def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
     """
@@ -31,8 +31,33 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
     # Create the plot
     fig, ax = plt.subplots(figsize=(12, 10), dpi=170)
     
-    # Define base colors for each class - ensure we have enough colors
-    base_colors = ['red', 'green', 'blue', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    # Generate NUM_CLASSES unique colors
+    def generate_distinct_colors(n):
+        """Generate n distinct colors using HSV color space"""
+        import matplotlib.colors as mcolors
+        colors = []
+        for i in range(n):
+            hue = i / n  # Evenly space hues around the color wheel
+            saturation = 0.7 + 0.3 * (i % 2)  # Alternate between 0.7 and 1.0 saturation
+            value = 0.8 + 0.2 * ((i // 2) % 2)  # Alternate brightness for better distinction
+            rgb = mcolors.hsv_to_rgb([hue, saturation, value])
+            colors.append(mcolors.to_hex(rgb))
+        return colors
+    
+    # Alternative approach using matplotlib's tab20 and other colormaps
+    def generate_colors_from_colormaps(n):
+        """Generate colors using matplotlib's predefined colormaps"""
+        import matplotlib.cm as cm
+        if n <= 10:
+            return [cm.tab10(i) for i in range(n)]
+        elif n <= 20:
+            return [cm.tab20(i) for i in range(n)]
+        else:
+            # For more than 20, use a continuous colormap
+            return [cm.hsv(i/n) for i in range(n)]
+    
+    # Use the HSV approach for better color distinction
+    base_colors = generate_distinct_colors(NUM_CLASSES)
     
     # Create lighter versions for the heatmap
     def lighten_color(color, factor=0.6):
@@ -74,7 +99,7 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
             w_normalized = w_i_np
         
         # Plot arrow from origin in weight direction using base color
-        color = base_colors[i % len(base_colors)]
+        color = base_colors[i]
         ax.arrow(0, 0, w_normalized[0], w_normalized[1],
                 head_width=0.15, head_length=0.15, 
                 fc=color, ec=color, linewidth=3,
@@ -89,7 +114,7 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
         projected_point = (weights.T @ x).detach().cpu().numpy()  # Project to 2D space
         
         # Plot circle at the projected point
-        color = base_colors[i % len(base_colors)]
+        color = base_colors[i]
         ax.scatter(projected_point[0], projected_point[1], 
                   s=200, c=color, marker='o', 
                   edgecolors='black', linewidth=2,
