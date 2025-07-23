@@ -274,10 +274,10 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 100
+    NUM_EPOCHS = 50
     BATCHS_PER_EPOCH =100
     BATCH_SIZE = 128
-    LEARNING_RATE = 5e-3
+    LEARNING_RATE = 2.5e-3
 
 
     model = ToyModelLinear().to(device)
