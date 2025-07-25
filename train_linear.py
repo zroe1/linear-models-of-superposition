@@ -7,7 +7,7 @@ from plots import create_enhanced_phase_diagram
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
 
-NUM_CLASSES = 100
+NUM_CLASSES = 50
 NUM_FEATURES = 2
 IMPORTANCE = (0.85 ** torch.arange(0, NUM_CLASSES)).to(device)
 
@@ -197,11 +197,9 @@ def evaluate_accuracy(model):
     accuracy = (correct_predictions / total_predictions) * 100.0
     return accuracy
 
-def train_linear(model, epochs, total_batchs, batch_size, optimizer):
+def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
     model.train()
     loss_total = 0
-
-    loss_func = ImporanceWeightedMSE()
 
     for epoch in range(epochs):
         for i in range(total_batchs):
@@ -209,26 +207,24 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer):
 
             targets =  torch.randint(0, NUM_CLASSES, (batch_size,)).to(device)
 
-            sparsity_tensor = torch.zeros_like(x).to(device)
+            target_tensor = torch.zeros_like(x).to(device)
             batch_indices = torch.arange(batch_size).to(device)
-            sparsity_tensor[batch_indices, targets, 0] = 1
 
+            # create tensor of 1s and 0s with probability sparsity
+            sparsity_tensor = torch.bernoulli(torch.full((batch_size, NUM_CLASSES, 1), sparsity)).to(device)
+            sparsity_tensor = sparsity_tensor * 0.2
+            # sparsity_tensor = torch.zeros_like(x).to(device)
+            sparsity_tensor[batch_indices, targets, 0] = 1
+            assert x.shape == sparsity_tensor.shape
             
             x = (x*sparsity_tensor).to(device)
+            
             pred = model(x)
-
-            # loss = torch.tensor([0.0]).to(device)
-            # for b in range(batch_size):
-            #     p = pred[b].to(device)
-            #     target = targets[b].to(device)
-
-            #     loss += loss_func(p, x[b], IMPORTANCE)
 
             loss = torch.tensor([0.0]).to(device)
             for b in range(batch_size):
                 p = pred[b].to(device)
                 target = targets[b].to(device)
-                # loss += f6(p, target)
                 loss += zephy_loss1(p, target, x[b][target])
             loss_total += loss.item()
 
@@ -274,19 +270,19 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 10
-    BATCHS_PER_EPOCH =100
-    BATCH_SIZE = 128
-    LEARNING_RATE = 2e-2
+    NUM_EPOCHS = 50
+    BATCHS_PER_EPOCH =50
+    BATCH_SIZE = 64
+    LEARNING_RATE = 1e-2
 
 
     model = ToyModelLinear().to(device)
 
-    SPARSITY = 0.90
+    SPARSITY = 0.999
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     # loss_func = ImporanceWeightedMSE()
 
-    train_linear(model, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer)
+    train_linear(model, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer, SPARSITY)
     print(smallest_angle_between_weights(model))
     
     # Evaluate accuracy
@@ -294,6 +290,10 @@ if __name__ == "__main__":
     print(f"Linear Model Accuracy: {accuracy:.2f}%")
     print(f"Is in superposition: {is_superposition(model)}")
  
+    # Save the trained model
+    torch.save(model.state_dict(), 'trained_linear_model.pth')
+    print("Model saved as 'trained_linear_model.pth'")
+
     phase_data = create_enhanced_phase_diagram(model.weights.T.detach().cpu(), model.weights.T.detach().cpu(), 
                                            model.bias.detach().cpu(), 'cpu')
 

@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-NUM_CLASSES = 100
+NUM_CLASSES = 50
 
 def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
     """
