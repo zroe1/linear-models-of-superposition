@@ -83,6 +83,7 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
                    alpha=0.8, cmap=custom_cmap, vmin=0, vmax=max_class)
     
     # Plot weight vectors as arrows only
+    arrow_length_threshold = 0.15  # Only show arrows for weights with length > threshold
     for i in range(weights.shape[0]):
         w_i = weights[i]
         
@@ -92,18 +93,18 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
         # Normalize and scale the weight vector for arrow display
         arrow_scale = 1.5  # Adjust this to make arrows longer/shorter
         arrow_length = np.linalg.norm(w_i_np)
-        if arrow_length > 0:
+        if arrow_length > arrow_length_threshold:
             # Normalize and scale
             w_normalized = w_i_np / arrow_length * arrow_scale
+            
+            # Plot arrow from origin in weight direction using base color
+            color = base_colors[i]
+            ax.arrow(0, 0, w_normalized[0], w_normalized[1],
+                    head_width=0.15, head_length=0.15, 
+                    fc=color, ec=color, linewidth=3,
+                    label=f'Class {i} weight', alpha=0.9)
         else:
-            w_normalized = w_i_np
-        
-        # Plot arrow from origin in weight direction using base color
-        color = base_colors[i]
-        ax.arrow(0, 0, w_normalized[0], w_normalized[1],
-                head_width=0.15, head_length=0.15, 
-                fc=color, ec=color, linewidth=3,
-                label=f'Class {i} weight', alpha=0.9)
+            print(f"Skipping arrow for class {i} (weight length {arrow_length:.4f} < threshold {arrow_length_threshold})")
     
     # Add one-hot vector projections
     print("Adding one-hot vector projections...")

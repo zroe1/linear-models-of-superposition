@@ -150,7 +150,7 @@ def zephy_loss1(logits, target, input_t):
         masked_logits[target] = float('-inf')
         i_neq_t = torch.argmax(masked_logits)
     # return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.0001
-    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.0001
+    return (logits[target] - input_t)**2 + logits[i_neq_t] * 2
 
 # def zephy_loss1(logits, target, input_t):
 #     i_neq_t = torch.argmax(logits)
@@ -274,10 +274,10 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 100
+    NUM_EPOCHS = 10
     BATCHS_PER_EPOCH =100
     BATCH_SIZE = 128
-    LEARNING_RATE = 2.5e-3
+    LEARNING_RATE = 2e-2
 
 
     model = ToyModelLinear().to(device)
