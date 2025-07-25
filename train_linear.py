@@ -150,7 +150,7 @@ def zephy_loss1(logits, target, input_t):
         masked_logits[target] = float('-inf')
         i_neq_t = torch.argmax(masked_logits)
     # return (logits[target] - input_t)**2 + logits[i_neq_t] * 0.0001
-    return (logits[target] - input_t)**2 + logits[i_neq_t] * 2
+    return (logits[target] - input_t)**2 + logits[i_neq_t] * 0
 
 # def zephy_loss1(logits, target, input_t):
 #     i_neq_t = torch.argmax(logits)
