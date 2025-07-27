@@ -7,7 +7,7 @@ from plots import create_enhanced_phase_diagram
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
 
-NUM_CLASSES = 50
+NUM_CLASSES = 100
 NUM_FEATURES = 2
 IMPORTANCE = (0.85 ** torch.arange(0, NUM_CLASSES)).to(device)
 
@@ -212,7 +212,7 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
 
             # create tensor of 1s and 0s with probability sparsity
             sparsity_tensor = torch.bernoulli(torch.full((batch_size, NUM_CLASSES, 1), sparsity)).to(device)
-            sparsity_tensor = sparsity_tensor * 0.2
+            sparsity_tensor = sparsity_tensor * 0.005
             # sparsity_tensor = torch.zeros_like(x).to(device)
             sparsity_tensor[batch_indices, targets, 0] = 1
             assert x.shape == sparsity_tensor.shape
@@ -270,10 +270,10 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 50
+    NUM_EPOCHS = 100
     BATCHS_PER_EPOCH =50
-    BATCH_SIZE = 64
-    LEARNING_RATE = 1e-2
+    BATCH_SIZE = 512
+    LEARNING_RATE = 5e-3
 
 
     model = ToyModelLinear().to(device)
