@@ -270,15 +270,15 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 100
+    NUM_EPOCHS = 200
     BATCHS_PER_EPOCH =50
-    BATCH_SIZE = 512
+    BATCH_SIZE = 256
     LEARNING_RATE = 5e-3
 
 
     model = ToyModelLinear().to(device)
 
-    SPARSITY = 0.999
+    SPARSITY = 0.95
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     # loss_func = ImporanceWeightedMSE()
 
