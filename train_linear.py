@@ -200,8 +200,17 @@ def evaluate_accuracy(model):
 def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
     model.train()
     loss_total = 0
+    
+    # Store initial learning rate for cosine decay
+    initial_lr = optimizer.param_groups[0]['lr']
+    import math
 
     for epoch in range(epochs):
+        # Apply cosine decay: lr = initial_lr * 0.5 * (1 + cos(π * epoch / total_epochs))
+        cosine_lr = initial_lr * 0.5 * (1 + math.cos(math.pi * epoch / epochs))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = cosine_lr
+            
         for i in range(total_batchs):
             x = torch.rand(batch_size, NUM_CLASSES, 1).to(device)
 
@@ -212,13 +221,12 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
 
             # create tensor of 1s and 0s with probability sparsity
             sparsity_tensor = torch.bernoulli(torch.full((batch_size, NUM_CLASSES, 1), sparsity)).to(device)
-            sparsity_tensor = sparsity_tensor * 0.005
+            sparsity_tensor = sparsity_tensor * 0.1
             # sparsity_tensor = torch.zeros_like(x).to(device)
             sparsity_tensor[batch_indices, targets, 0] = 1
             assert x.shape == sparsity_tensor.shape
             
             x = (x*sparsity_tensor).to(device)
-            
             pred = model(x)
 
             loss = torch.tensor([0.0]).to(device)
@@ -238,7 +246,9 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
             print("Superposition detected")
             break
 
-        print("EPHOCH:", epoch + 1, "--> loss:", loss_total / (total_batchs * batch_size))
+        # Evaluate and print accuracy at each epoch
+        accuracy = evaluate_accuracy(model)
+        print(f"EPOCH: {epoch + 1} --> loss: {loss_total / (total_batchs * batch_size):.6f}, accuracy: {accuracy:.2f}%, lr: {cosine_lr:.6f}")
         loss_total = 0
 
 def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, importance, sparsity):
@@ -270,10 +280,12 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 200
+    # NUM_EPOCHS = 200
+    NUM_EPOCHS = 50
     BATCHS_PER_EPOCH =50
-    BATCH_SIZE = 256
-    LEARNING_RATE = 5e-3
+    # BATCH_SIZE = 256
+    BATCH_SIZE = 64
+    LEARNING_RATE = 5e-2
 
 
     model = ToyModelLinear().to(device)
