@@ -281,10 +281,10 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
 if __name__ == "__main__":
 
     # NUM_EPOCHS = 200
-    NUM_EPOCHS = 50
+    NUM_EPOCHS = 200
     BATCHS_PER_EPOCH =50
     # BATCH_SIZE = 256
-    BATCH_SIZE = 64
+    BATCH_SIZE = 128
     LEARNING_RATE = 5e-2
 
 
