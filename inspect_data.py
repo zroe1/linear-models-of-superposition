@@ -128,7 +128,7 @@ def inspect_model_outputs(model, data_loader, temperature=10.0, num_samples=100)
 
 def main():
     # Load the trained model
-    temperature = 10.0
+    temperature = 20.0
     
     print("Loading trained model...")
     model = SimpleMLP(input_size=784, hidden_size=128, num_classes=10).to(device)
