@@ -203,7 +203,7 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer, X_train):
 
 if __name__ == "__main__":
 
-    NUM_EPOCHS = 50
+    NUM_EPOCHS = 100
     BATCHS_PER_EPOCH = 50
     BATCH_SIZE = 256
     LEARNING_RATE = 1e-2
