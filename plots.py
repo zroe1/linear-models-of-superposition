@@ -117,7 +117,7 @@ def create_enhanced_phase_diagram(weights, unembedding_w, bias, device):
         # Plot circle at the projected point
         color = base_colors[i]
         ax.scatter(projected_point[0], projected_point[1], 
-                  s=200, c=color, marker='o', 
+                  s=80, c=color, marker='o', 
                   edgecolors='black', linewidth=2,
                   label=f'Class {i} one-hot', alpha=0.9, zorder=10)
         

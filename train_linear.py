@@ -109,6 +109,16 @@ class ImporanceWeightedMSEBatch(nn.Module):
         sub_total = ((predictions - targets)**2).sum(0).flatten()
         return sum(sub_total * importance)
 
+class MSEBatch(nn.Module):
+    """MSE loss without importance weighting."""
+    def __init__(self):
+        super(MSEBatch, self).__init__()
+
+    def forward(self, predictions, targets, importance=None):
+        # Handle batch dimension properly, ignore importance parameter
+        sub_total = ((predictions - targets)**2).sum(0).flatten()
+        return sum(sub_total)
+
 class ToyModelLinear(nn.Module):
     def __init__(self):
         super().__init__()
@@ -134,6 +144,19 @@ class ToyModelReLU(nn.Module):
         final = self.weights.T @ hidden
         final += self.bias
         return self.ReLU(final)
+
+class ToyModelSoftmax(nn.Module):
+    """Softmax model similar to linear model structure."""
+    def __init__(self):
+        super().__init__()
+        self.weights = nn.Parameter(torch.randn(NUM_FEATURES, NUM_CLASSES), requires_grad=True)
+        self.bias = nn.Parameter(torch.randn(NUM_CLASSES, 1), requires_grad=True)
+
+    def forward(self, x): # x is NUM_CLASSES * 1
+        hidden = self.weights @ x
+        final = self.weights.T @ hidden
+        final += self.bias
+        return F.log_softmax(final, dim=0)
     
 def f6(logits, target):
     i_neq_t = torch.argmax(logits)
@@ -186,9 +209,9 @@ def evaluate_accuracy(model):
             one_hot = torch.zeros(NUM_CLASSES, 1).to(device)
             one_hot[class_idx, 0] = 1.0
             
-            # Get model prediction
-            output = model(one_hot.unsqueeze(0))  # Add batch dimension
-            predicted_class = torch.argmax(output[0]).item()
+            # Get model prediction (no batch dimension needed)
+            output = model(one_hot)  # Shape: (NUM_CLASSES, 1)
+            predicted_class = torch.argmax(output.squeeze()).item()
             
             # Check if prediction matches the true class
             if predicted_class == class_idx:
@@ -248,7 +271,19 @@ def train_linear(model, epochs, total_batchs, batch_size, optimizer, sparsity):
 
         # Evaluate and print accuracy at each epoch
         accuracy = evaluate_accuracy(model)
-        print(f"EPOCH: {epoch + 1} --> loss: {loss_total / (total_batchs * batch_size):.6f}, accuracy: {accuracy:.2f}%, lr: {cosine_lr:.6f}")
+        avg_loss = loss_total / (total_batchs * batch_size)
+        print(f"EPOCH: {epoch + 1} --> loss: {avg_loss:.6f}, accuracy: {accuracy:.2f}%, lr: {cosine_lr:.6f}")
+        
+        # Debug: print some predictions on first few epochs
+        if epoch < 3:
+            model.eval()
+            with torch.no_grad():
+                test_input = torch.zeros(NUM_CLASSES, 1).to(device)
+                test_input[0, 0] = 1.0  # One-hot for class 0
+                test_output = model(test_input)
+                print(f"  Debug - Input class 0, predicted probs: {torch.exp(test_output.squeeze())[:5]}")
+            model.train()
+        
         loss_total = 0
 
 def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, importance, sparsity):
@@ -257,7 +292,15 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
     model.train()
     loss_total = 0
     
+    # Store initial learning rate for cosine decay
+    initial_lr = optimizer.param_groups[0]['lr']
+    import math
+    
     for epoch in range(epochs):
+        # Apply cosine decay: lr = initial_lr * 0.5 * (1 + cos(π * epoch / total_epochs))
+        cosine_lr = initial_lr * 0.5 * (1 + math.cos(math.pi * epoch / epochs))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = cosine_lr
         for i in range(total_batchs):
             # Generate sparse data using bernoulli distribution like in reference
             sparsity_tensor = torch.bernoulli(torch.full((NUM_CLASSES, 1), probability)).to(device)
@@ -275,41 +318,135 @@ def train_relu(model, epochs, total_batchs, batch_size, loss_fn, optimizer, impo
             print("Superposition detected")
             break
 
-        print("EPOCH:", epoch + 1, "--> loss:", loss_total / (total_batchs * batch_size))
+        print(f"EPOCH: {epoch + 1} --> loss: {loss_total / (total_batchs * batch_size):.6f}, lr: {cosine_lr:.6f}")
+        loss_total = 0
+
+def train_softmax(model, epochs, total_batchs, batch_size, optimizer, sparsity):
+    """Train Softmax model with cross entropy loss, using same input sampling as train_linear."""
+    model.train()
+    loss_total = 0
+    
+    # Store initial learning rate for cosine decay
+    initial_lr = optimizer.param_groups[0]['lr']
+    import math
+
+    for epoch in range(epochs):
+        # Apply cosine decay: lr = initial_lr * 0.5 * (1 + cos(π * epoch / total_epochs))
+        cosine_lr = initial_lr * 0.5 * (1 + math.cos(math.pi * epoch / epochs))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = cosine_lr
+            
+        for i in range(total_batchs):
+            x = torch.rand(batch_size, NUM_CLASSES, 1).to(device)
+
+            targets = torch.randint(0, NUM_CLASSES, (batch_size,)).to(device)
+
+            target_tensor = torch.zeros_like(x).to(device)
+            batch_indices = torch.arange(batch_size).to(device)
+
+            # create tensor of 1s and 0s with probability sparsity
+            sparsity_tensor = torch.bernoulli(torch.full((batch_size, NUM_CLASSES, 1), sparsity)).to(device)
+            sparsity_tensor = sparsity_tensor * 0.1
+            # sparsity_tensor = torch.zeros_like(x).to(device)
+            sparsity_tensor[batch_indices, targets, 0] = 1
+            assert x.shape == sparsity_tensor.shape
+            
+            x = (x*sparsity_tensor).to(device)
+
+            # Use cross entropy loss (pred is already log probabilities)
+            loss = torch.tensor([0.0]).to(device)
+            for b in range(batch_size):
+                # Process each sample individually (model doesn't handle batches)
+                sample_input = x[b].to(device)  # Shape: (NUM_CLASSES, 1)
+                log_p = model(sample_input).to(device)  # Shape: (NUM_CLASSES, 1)
+                target = targets[b].to(device)
+                # Cross entropy loss: -log_p[target] (since pred is already log_softmax)
+                loss += -log_p[target, 0]  # Need [target, 0] since log_p is (NUM_CLASSES, 1)
+            loss_total += loss.item()
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        if is_superposition(model):
+            print("Superposition detected")
+            break
+
+        # Evaluate and print accuracy at each epoch
+        accuracy = evaluate_accuracy(model)
+        print(f"EPOCH: {epoch + 1} --> loss: {loss_total / (total_batchs * batch_size):.6f}, accuracy: {accuracy:.2f}%, lr: {cosine_lr:.6f}")
         loss_total = 0
 
 if __name__ == "__main__":
 
     # NUM_EPOCHS = 200
-    NUM_EPOCHS = 200
+    NUM_EPOCHS = 50
     BATCHS_PER_EPOCH =50
     # BATCH_SIZE = 256
     BATCH_SIZE = 128
-    LEARNING_RATE = 5e-2
+    LEARNING_RATE = 5e-3  # Lower learning rate for softmax/cross-entropy
 
 
-    model = ToyModelLinear().to(device)
-
-    SPARSITY = 0.95
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    # loss_func = ImporanceWeightedMSE()
-
-    train_linear(model, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer, SPARSITY)
-    print(smallest_angle_between_weights(model))
+    # First, train the linear model for 50 epochs
+    print("="*60)
+    print("PHASE 1: Training Linear Model for 50 epochs")
+    print("="*60)
     
-    # Evaluate accuracy
-    accuracy = evaluate_accuracy(model)
-    print(f"Linear Model Accuracy: {accuracy:.2f}%")
-    print(f"Is in superposition: {is_superposition(model)}")
+    model_linear = ToyModelLinear().to(device)
+    SPARSITY = 0.999
+    optimizer_linear = torch.optim.Adam(model_linear.parameters(), lr=LEARNING_RATE)
+
+    train_linear(model_linear, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer_linear, SPARSITY)
+    print(f"Linear model smallest angle: {smallest_angle_between_weights(model_linear)}")
+    
+    # Evaluate linear model accuracy
+    accuracy_linear = evaluate_accuracy(model_linear)
+    print(f"Linear Model Accuracy: {accuracy_linear:.2f}%")
+    print(f"Is in superposition: {is_superposition(model_linear)}")
  
-    # Save the trained model
-    torch.save(model.state_dict(), 'trained_linear_model.pth')
-    print("Model saved as 'trained_linear_model.pth'")
+    # Save the trained linear model
+    torch.save(model_linear.state_dict(), 'trained_linear_model.pth')
+    print("Linear model saved as 'trained_linear_model.pth'")
 
-    phase_data = create_enhanced_phase_diagram(model.weights.T.detach().cpu(), model.weights.T.detach().cpu(), 
-                                           model.bias.detach().cpu(), 'cpu')
-
+    print("\n" + "="*60)
+    print("PHASE 2: Transferring weights to Softmax Model and training for 50 more epochs")
+    print("="*60)
     
+    # Create softmax model and load linear model weights
+    model_softmax = ToyModelSoftmax().to(device)
+    
+    # Transfer weights from linear model to softmax model
+    model_softmax.weights.data = model_linear.weights.data.clone()
+    model_softmax.bias.data = model_linear.bias.data.clone()
+    
+    print("Weights transferred from linear model to softmax model")
+    print(f"Initial softmax model smallest angle: {smallest_angle_between_weights(model_softmax)}")
+    
+    # Create new optimizer for softmax model
+    optimizer_softmax = torch.optim.Adam(model_softmax.parameters(), lr=LEARNING_RATE)
+
+    # Train softmax model for another 50 epochs
+    train_softmax(model_softmax, NUM_EPOCHS, BATCHS_PER_EPOCH, BATCH_SIZE, optimizer_softmax, SPARSITY)
+    print(f"Final softmax model smallest angle: {smallest_angle_between_weights(model_softmax)}")
+    
+    # Evaluate final softmax model accuracy
+    accuracy_softmax = evaluate_accuracy(model_softmax)
+    print(f"Final Softmax Model Accuracy: {accuracy_softmax:.2f}%")
+    print(f"Is in superposition: {is_superposition(model_softmax)}")
+ 
+    # Save the trained softmax model
+    torch.save(model_softmax.state_dict(), 'trained_softmax_model.pth')
+    print("Final softmax model saved as 'trained_softmax_model.pth'")
+
+    # Create phase diagram for the final model
+    phase_data = create_enhanced_phase_diagram(model_softmax.weights.T.detach().cpu(), model_softmax.weights.T.detach().cpu(), 
+                                           model_softmax.bias.detach().cpu(), 'cpu')
+
+    print(f"\nSummary:")
+    print(f"Linear Model (50 epochs) - Accuracy: {accuracy_linear:.2f}%, Angle: {smallest_angle_between_weights(model_linear):.2f}°")
+    print(f"Softmax Model (50 more epochs) - Accuracy: {accuracy_softmax:.2f}%, Angle: {smallest_angle_between_weights(model_softmax):.2f}°")
+
+
     
     # print("\n" + "="*50)
     # print("Training 90% Sparsity ReLU Model")
